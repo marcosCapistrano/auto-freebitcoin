@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
@@ -19,10 +21,36 @@ const MODAL_BUTTON = "#myModal4"
 const RECAPTCHA = "#free_play_recaptcha > form > div"
 const BONUS_GROUP = "#reward_points_bonuses_main_div"
 
+const (
+	MODAL_22                string = "#myModal22"
+	MODAL_22_CLOSE          string = "#myModal22 > a"
+	MODAL_PUSH_NOTIFICATION string = "#push_notification_modal"
+	MODAL_PUSH_
+	NOTIFICATION_CLOSE string = "#push_notification_modal > div.push_notification_small > div:nth-child(2) > div > div.pushpad_deny_button"
+)
+
+const (
+	RECAPTCHA_SELECTOR string = ""
+)
+
 type modal struct {
-	visible       bool
+	node          *cdp.Node
 	selector      string
 	closeSelector string
+}
+
+func (m *modal) isVisible() bool {
+	visible := false
+	attrs := m.node.Attributes
+
+	for _, attr := range attrs {
+		//fmt.Println(attr)
+		if strings.Contains(attr, "open") {
+			visible = true
+		}
+	}
+
+	return visible
 }
 
 type captcha struct {
@@ -38,10 +66,10 @@ type timer struct {
 }
 
 func main() {
-	modals := []*modal{{selector: MODAL, closeSelector: MODAL_BUTTON}, {selector: MODAL_200, closeSelector: MODAL_200_BUTTON}}
-	var ws string
-	fmt.Printf("Entre com o websocket: ")
-	fmt.Scanln(&ws)
+	modals := []*modal{{selector: MODAL_22, closeSelector: MODAL_22_CLOSE}, {selector: MODAL_PUSH_NOTIFICATION, closeSelector: MODAL_PUSH_NOTIFICATION_CLOSE}}
+	var ws string = "ws://127.0.0.1:9222/devtools/browser/6c2f3c1c-02d1-45da-85e0-e1604a7e4f32"
+	//fmt.Printf("Entre com o websocket: ")
+	//fmt.Scanln(&ws)
 
 	remoteAlloc, cancel := chromedp.NewRemoteAllocator(context.Background(), ws)
 	defer cancel()
@@ -57,7 +85,22 @@ func main() {
 	for {
 		fmt.Println("Trying..")
 
-		updateModals(ctx, modals)
+		ok, sleepTime := checkTimer(ctx)
+
+		if ok {
+			updateModals(ctx, modals)
+			ok, openModals := checkModals(ctx, modals)
+
+			if !ok {
+				fmt.Println("Found visible modals..")
+				closeModals(ctx, openModals)
+			} else {
+
+			}
+		} else {
+			fmt.Printf("Sleeping for %v", sleepTime)
+			time.Sleep(sleepTime)
+		}
 
 		time.Sleep(5 * time.Second)
 	}
@@ -114,6 +157,31 @@ func main() {
 	*/
 }
 
+func checkTimer(ctx context.Context) (ok bool, sleepTime time.Duration) {
+	ok = true
+	fmt.Println("Checking TIMER")
+	var timer []*cdp.Node
+	err := chromedp.Run(ctx, chromedp.Nodes(TIMER, &timer, chromedp.AtLeast(0)))
+	if err != nil {
+		panic(err)
+	}
+	if len(timer) > 0 {
+		ok = false
+		fmt.Println("Timer exists!")
+		st, err := strconv.Atoi(timer[0].Children[0].NodeValue)
+		if err != nil {
+			return
+		}
+		if st > 0 {
+			sleepTime = time.Duration(st) * time.Minute
+		} else {
+			sleepTime = 1 * time.Minute
+		}
+	}
+
+	return ok, sleepTime
+}
+
 func updateModals(ctx context.Context, modals []*modal) {
 	for _, mod := range modals {
 		var n []*cdp.Node
@@ -123,11 +191,62 @@ func updateModals(ctx context.Context, modals []*modal) {
 		}
 
 		if len(n) > 0 {
-			fmt.Println("Modal exists!")
-			attrs := n[0].Attributes
+			mod.node = n[0]
+		}
+	}
+}
 
-			for _, attr := range attrs {
-				fmt.Println(attr)
+func checkModals(ctx context.Context, modals []*modal) (ok bool, openModals []*modal) {
+	ok = true
+	for _, mod := range modals {
+		if mod.isVisible() {
+			ok = false
+			openModals = append(openModals, mod)
+		}
+	}
+
+	time.Sleep(5 * time.Second)
+	return ok, openModals
+}
+
+func closeModals(ctx context.Context, openModals []*modal) {
+	for _, op := range openModals {
+		err := chromedp.Run(ctx,
+			chromedp.Click(op.closeSelector, chromedp.AtLeast(0)),
+		)
+		if err != nil {
+			panic(err)
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+/*
+func seila(ctx context.Context, modals []*modal) {
+	for _, mod := range modals {
+		var n []*cdp.Node
+		err := chromedp.Run(ctx, chromedp.Nodes(mod.selector, &n, chromedp.AtLeast(0)))
+		if err != nil {
+			panic(err)
+		}
+
+		if len(n) > 0 {
+			fmt.Println("Modal exists!")
+			mod.node = n[0]
+			fmt.Println("printando aquii")
+			fmt.Println(n[0])
+			fmt.Println("------------------")
+			if mod.isVisible() {
+				canProceed = true
+				fmt.Println("Modal is visible!")
+				err = chromedp.Run(ctx,
+					chromedp.Click(MODAL_22_CLOSE, chromedp.BySearch),
+				)
+				if err != nil {
+					panic(err)
+				}
+			} else {
+				fmt.Println("Modal is not visible!")
 			}
 		}
 	}
@@ -142,5 +261,5 @@ func updateModals(ctx context.Context, modals []*modal) {
 				}
 			}
 		}
-	*/
 }
+*/
